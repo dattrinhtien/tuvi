@@ -68,7 +68,7 @@ async def get_tuvi(data: TuViInput):
             "data": {
                 "thien_ban": {
                     "ten": tb.ten, "ngay_sinh": f"{data.birth_day}/{data.birth_month}/{data.birth_year}",
-                    "nam_duong": tb.namDuong, "am_duong_nam_nu": f"{tb.amDuongNamSinh} {tb.namNu}",
+                    "nam_duong": tb.namDuong, "gioi_tinh": "nam" if gioi_tinh_int == 1 else "nu", "am_duong_nam_nu": f"{tb.amDuongNamSinh} {tb.namNu}",
                     "menh": tb.menh, "cuc": tb.tenCuc, "ban_menh": tb.banMenh,
                     "nam_am": f"{tb.canNamTen} {tb.chiNamTen}", "thang_am": f"{tb.canThangTen} {tb.chiThangTen}",
                     "ngay_am": f"{tb.canNgayTen} {tb.chiNgayTen}", "gio_am": tb.gioSinh,
