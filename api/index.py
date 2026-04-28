@@ -5,38 +5,32 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from fastapi.middleware.cors import CORSMiddleware
 import os
+import sys
 from dotenv import load_dotenv
 import google.generativeai as genai
 import requests
 import json
+import traceback
 
 # Load environment variables
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-# Cấu hình AI
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    ai_model = genai.GenerativeModel('gemini-1.5-flash')
-else:
-    ai_model = None
+# THIẾT LẬP ĐƯỜNG DẪN (QUAN TRỌNG CHO VERCEL)
+CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+if CURRENT_DIR not in sys.path:
+    sys.path.append(CURRENT_DIR)
 
-# Quan trọng: Import từ thư mục con trong môi trường Serverless
+# Import engine
 try:
-    from .lasotuvi.App import lapDiaBan
-    from .lasotuvi.DiaBan import diaBan
-    from .lasotuvi.ThienBan import lapThienBan
-except ImportError:
-    try:
-        from lasotuvi.App import lapDiaBan
-        from lasotuvi.DiaBan import diaBan
-        from lasotuvi.ThienBan import lapThienBan
-    except ImportError:
-        import sys
-        sys.path.append(os.path.dirname(__file__))
-        from lasotuvi.App import lapDiaBan
-        from lasotuvi.DiaBan import diaBan
-        from lasotuvi.ThienBan import lapThienBan
+    from lasotuvi.App import lapDiaBan
+    from lasotuvi.DiaBan import diaBan
+    from lasotuvi.ThienBan import lapThienBan
+except Exception as e:
+    # Nếu lỗi, trả về lỗi này để debug
+    INIT_ERROR = f"Lỗi Import Engine: {str(e)}\n{traceback.format_exc()}"
+else:
+    INIT_ERROR = None
 
 app = FastAPI()
 
@@ -57,8 +51,15 @@ class TuViInput(BaseModel):
     gender: str
     calendar_type: str = "solar"
 
+@app.get("/api/health")
+def health():
+    return {"status": "ok", "init_error": INIT_ERROR}
+
 @app.post("/")
 async def get_tuvi(data: TuViInput):
+    if INIT_ERROR:
+        return {"success": False, "error": INIT_ERROR}
+    
     try:
         gioi_tinh_int = 1 if data.gender.lower() in ['nam', 'male'] else -1
         is_solar_bool = True if data.calendar_type == "solar" else False
@@ -99,40 +100,37 @@ async def get_tuvi(data: TuViInput):
                     "ngay_am": f"{tb.canNgayTen} {tb.chiNgayTen}",
                     "gio_am": tb.gioSinh,
                     "menh_chu": tb.menhChu,
-                    "than_chu": tb.than_chu if hasattr(tb, 'than_chu') else tb.thanChu,
+                    "than_chu": tb.thanChu if hasattr(tb, 'thanChu') else getattr(tb, 'than_chu', 'N/A'),
                     "sinh_khac": tb.sinhKhac
                 },
                 "cung": cung_dict
             }
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
-
-class InterpretInput(BaseModel):
-    data: dict
+        return {"success": False, "error": f"Lỗi Engine: {str(e)}\n{traceback.format_exc()}"}
 
 @app.post("/interpret")
-async def interpret_tuvi(input_data: InterpretInput):
+async def interpret_tuvi(input_data: dict):
+    # Dùng dict để linh hoạt hơn
     try:
-        data = input_data.data
+        data = input_data.get("data", {})
         thien_ban = data.get("thien_ban", {})
         cung_dict = data.get("cung", {})
         cung_info = "\n".join([f"Cung {v['chu_cung']} ({v['name']}): {', '.join(v['stars'])}" for k, v in cung_dict.items()])
         
-        prompt_text = f"""
-        Bạn là Đại đệ tử của sư phục Trịnh Tiến Đạt. Hãy luận giải lá số cho {thien_ban.get('ten')}. 
-        Hôm nay là tháng 4/2026. Hãy phân tích: Tính cách, Sự nghiệp, Tình duyên, Đại hạn hiện tại và 3 năm 2025, 2026, 2027. 
-        Vẽ biểu đồ thăng trầm cuộc đời bằng các đoạn văn.
-        Chi tiết: {cung_info}
-        """
+        prompt_text = f"Luận giải lá số Tử Vi cho {thien_ban.get('ten')}. Bối cảnh 2026. Phân tích: Tính cách, Sự nghiệp, Tình duyên, Đại hạn, 3 năm 2025-2027. Vẽ thăng trầm bằng văn bản.\nDữ liệu: {cung_info}"
+
+        if not GEMINI_API_KEY:
+            return {"success": False, "error": "Thiếu API Key"}
 
         models = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-flash-latest']
         for model in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={GEMINI_API_KEY}"
             payload = {"contents": [{"parts": [{"text": prompt_text}]}]}
-            response = requests.post(url, headers={'Content-Type': 'application/json'}, data=json.dumps(payload), timeout=60)
+            response = requests.post(url, json=payload, timeout=60)
             if response.status_code == 200:
                 return {"success": True, "interpretation": response.json()['candidates'][0]['content']['parts'][0]['text']}
-        return {"success": False, "error": "AI đang bận, vui lòng thử lại sau."}
+        
+        return {"success": False, "error": f"AI lỗi: {response.text}"}
     except Exception as e:
         return {"success": False, "error": str(e)}
