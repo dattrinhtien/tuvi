@@ -63,7 +63,7 @@ export default function Home() {
     setInterpretation(null);
 
     try {
-      const response = await fetch('/api', {
+      const response = await fetch('/api/tuvi', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData),
